@@ -1,18 +1,17 @@
-﻿using System;
+﻿using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Text;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Web;
-using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Microsoft.CodeAnalysis.Text;
 
-namespace SourceGeneratorSamples
+namespace TypedRegex
 {
     [Generator]
-    public class AutoNotifyGenerator : ISourceGenerator
+    public class TypedRegexGenerator : ISourceGenerator
     {
         private const string RegexAttribute = @"
 using System;
@@ -79,7 +78,6 @@ namespace TypedRegex
             context.RegisterForSyntaxNotifications(() => new SyntaxReceiver());
         }
 
-
         public void Execute(GeneratorExecutionContext context)
         {
             // add static source
@@ -92,7 +90,7 @@ namespace TypedRegex
 
             // we're going to create a new compilation that contains the attribute.
             // TODO: we should allow source generators to provide source during initialize, so that this step isn't required.
-            CSharpParseOptions parseOptions = (context.Compilation as CSharpCompilation).SyntaxTrees[0].Options as CSharpParseOptions;
+            CSharpParseOptions parseOptions = (context.Compilation as CSharpCompilation)?.SyntaxTrees[0].Options as CSharpParseOptions;
             Compilation compilation = context.Compilation.AddSyntaxTrees(CSharpSyntaxTree.ParseText(SourceText.From(RegexAttribute, Encoding.UTF8), parseOptions));
 
             // get the newly bound attribute
@@ -124,6 +122,8 @@ namespace TypedRegex
 
                 var xmlEscapedPattern = HttpUtility.HtmlEncode(pattern);
 
+#pragma warning disable RCS1214 // Unnecessary interpolated string.
+#pragma warning disable RCS1197 // Optimize StringBuilder.Append/AppendLine call.
                 var source = new StringBuilder($@"
 // {namespaceName}.{className}.generated.cs
 // Pattern: {pattern}
@@ -200,22 +200,28 @@ namespace {namespaceName} {{
 
         /// <summary>The captured substring matching the full expression.</summary>
         public string Value => RawMatch.Value;
+
 ");
                 foreach ((var matchIndex, var propertyName) in groupNames)
                 {
-                    source.AppendLine($@"        /// <summary>The capture group at index {matchIndex}</summary>");
-                    source.AppendLine($@"        public TypedRegex.MatchGroup {propertyName} {{ get; }}");
+                    source.AppendLine($"        /// <summary>The capture group at index {matchIndex}</summary>");
+                    source.AppendLine($"        public TypedRegex.MatchGroup {propertyName} {{ get; }}");
                 }
 
                 source.Append($@"
     }}
 }}
 ");
+#pragma warning restore RCS1197 // Optimize StringBuilder.Append/AppendLine call.
+#pragma warning restore RCS1214 // Unnecessary interpolated string.
+
                 context.AddSource($"{namespaceName}.{className}.generated.cs", source.ToString());
             }
         }
 
+#pragma warning disable IDE0057 // Use range operator (not compatible with .NET standard)
         private static string FirstToUpper(string input) => input[0].ToString().ToUpper() + input.Substring(1);
+#pragma warning restore IDE0057 // Use range operator
 
         /// <summary>
         /// Created on demand before each generation pass
