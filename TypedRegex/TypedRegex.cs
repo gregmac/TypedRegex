@@ -14,13 +14,13 @@ namespace SourceGeneratorSamples
     [Generator]
     public class AutoNotifyGenerator : ISourceGenerator
     {
-        private const string attributeText = @"
+        private const string TypedRegexAttribute = @"
 using System;
 using System.Text.RegularExpressions;
 namespace TypedRegex
 {
     [AttributeUsage(AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
-    public sealed class TypedRegexAttribute : Attribute
+    sealed class TypedRegexAttribute : Attribute
     {
         public TypedRegexAttribute(string pattern) : this(pattern, RegexOptions.None) { }
         public TypedRegexAttribute(string pattern, RegexOptions options)
@@ -32,6 +32,30 @@ namespace TypedRegex
     }
 }
 ";
+        private const string MatchGroup = @"
+using System.Collections.Generic;
+using System.Text.RegularExpressions;
+using System.Linq;
+
+namespace TypedRegex
+{
+    public class MatchGroup
+    {
+        public MatchGroup(Group group) 
+        {
+            RawGroup = group;
+        }
+        
+        public Group RawGroup {get;}
+        public int CaptureCount => RawGroup.Captures.Count;
+        public IEnumerable<string> Values => RawGroup.Captures.Cast<Capture>().Select(x => x.Value);
+        public string Value => RawGroup.Value;
+        public override string ToString() => RawGroup.Value;
+        public static implicit operator string(MatchGroup d) => d.RawGroup.Value;
+        public static implicit operator Group(MatchGroup d) => d.RawGroup;
+    }
+}";
+        private readonly Regex IntOnly = new Regex(@"^\d+$");
 
         public void Initialize(GeneratorInitializationContext context)
         {
@@ -39,19 +63,21 @@ namespace TypedRegex
             context.RegisterForSyntaxNotifications(() => new SyntaxReceiver());
         }
 
+
         public void Execute(GeneratorExecutionContext context)
         {
-            // add the attribute text
-            context.AddSource("TypedRegexAttribute", attributeText);
+            // add static source
+            context.AddSource(nameof(TypedRegexAttribute) + ".cs", TypedRegexAttribute);
+            context.AddSource(nameof(MatchGroup) + ".cs", MatchGroup);
 
-            // retrieve the populated receiver 
+            // retreive the populated receiver 
             if (!(context.SyntaxReceiver is SyntaxReceiver receiver))
                 return;
 
             // we're going to create a new compilation that contains the attribute.
             // TODO: we should allow source generators to provide source during initialize, so that this step isn't required.
             CSharpParseOptions parseOptions = (context.Compilation as CSharpCompilation).SyntaxTrees[0].Options as CSharpParseOptions;
-            Compilation compilation = context.Compilation.AddSyntaxTrees(CSharpSyntaxTree.ParseText(SourceText.From(attributeText, Encoding.UTF8), parseOptions));
+            Compilation compilation = context.Compilation.AddSyntaxTrees(CSharpSyntaxTree.ParseText(SourceText.From(TypedRegexAttribute, Encoding.UTF8), parseOptions));
 
             // get the newly bound attribute
             INamedTypeSymbol attributeSymbol = compilation.GetTypeByMetadataName("TypedRegex.TypedRegexAttribute");
@@ -62,7 +88,10 @@ namespace TypedRegex
                 SemanticModel model = compilation.GetSemanticModel(@class.SyntaxTree);
                 var classSymbol = model.GetDeclaredSymbol(@class);
                 var attributeData = classSymbol.GetAttributes()
-                    .Single(a => a.AttributeClass.Equals(attributeSymbol, SymbolEqualityComparer.Default));
+                    .SingleOrDefault(a => a.AttributeClass.Equals(attributeSymbol, SymbolEqualityComparer.Default));
+
+                // not one we care about
+                if (attributeData == null) continue;
 
                 string namespaceName = classSymbol.ContainingNamespace.ToDisplayString();
                 string className = classSymbol.Name;
@@ -73,23 +102,100 @@ namespace TypedRegex
                     ? (RegexOptions)attributeData.ConstructorArguments[1].Value
                     : RegexOptions.None;
 
-                context.AddSource($"{namespaceName}.{className}.generated.cs", $@"
+                var regex = new Regex(pattern, options);
+                var groupNames = regex.GetGroupNames()
+                    .Select((name, idx) => (idx, IntOnly.IsMatch(name) ? "Group" + name : FirstToUpper(name)));
+
+                var source = new StringBuilder($@"
 // {namespaceName}.{className}.generated.cs
 // Pattern: {pattern}
 // Options: {options}
+using System.Collections.Generic;
 using System.Text.RegularExpressions;
-namespace {namespaceName} {{
-    public partial class {className} {{
-        protected Regex Regex {{ get; }} = new Regex(@""{pattern.Replace("\"", "\"\"")}"", (RegexOptions){(int)options});
 
-        public bool IsMatch(string value) => Regex.IsMatch(value);
+namespace {namespaceName} {{
+    /// <summary>
+    /// Typed operations on the regular expression
+    /// <c>{pattern}</c>.
+    /// </summary>
+    public partial class {className} {{
+        protected static Regex Regex {{ get; }} = new Regex(@""{pattern.Replace("\"", "\"\"")}"", (RegexOptions){(int)options});
+
+        /// <summary>
+        /// Check if the <paramref name=""input""/> matches the regular expression
+        /// <c>{pattern}</c>.
+        /// </summary>
+        /// <param name=""input"">The string to search for a match</param>
+        public static bool IsMatch(string input) => Regex.IsMatch(input);
+
+        /// <summary>
+        /// Find the first match for <paramref name=""input""/> against the regular expression
+        /// <c>{pattern}</c>.
+        /// </summary>
+        /// <param name=""input"">The string to search for a match</param>
+        public static {className} Match(string input)
+        {{
+            var match = Regex.Match(input);
+            return match.Success ? new {className}(match) : null;
+        }}
+
+        /// <summary>
+        /// Find the first match for <paramref name=""input""/> against the regular expression
+        /// <c>{pattern}</c>, returning true if found.
+        /// </summary>
+        /// <param name=""input"">The string to search for a match</param>
+        public static bool TryMatch(string input, out {className} match)
+        {{
+            match = Match(input);
+            return match != null;
+        }}
+
+        /// <summary>
+        /// Find all matches for <paramref name=""input""/> against the regular expression
+        /// <c>{pattern}</c>.
+        /// </summary>
+        /// <param name=""input"">The string to search for a match</param>
+        public static IEnumerable<{className}> Matches(string input)
+        {{
+            var match = Regex.Match(input);
+            while (match.Success)
+            {{
+                yield return new {className}(match);
+                match = match.NextMatch();
+            }}
+        }}
+
+
+        private {className}(Match match)
+        {{
+            RawMatch = match;
+            ");
+                foreach ((var matchIndex, var propertyName) in groupNames)
+                {
+                    source.AppendLine($"{propertyName} = new TypedRegex.MatchGroup(match.Groups[{matchIndex}]);");
+                }
+                source.Append($@"
+        }}
+
+        public Match RawMatch {{ get; }}
+
+        public string Value => RawMatch.Value;
+
+        ");
+                foreach ((var matchIndex, var propertyName) in groupNames)
+                {
+                    source.AppendLine($@"        public TypedRegex.MatchGroup {propertyName} {{ get; }}");
+                }
+
+                source.Append($@"
     }}
 }}
-
 ");
-
+                context.AddSource($"{namespaceName}.{className}.generated.cs", source.ToString());
             }
         }
+
+        private static string FirstToUpper(string input) => input[0].ToString().ToUpper() + input.Substring(1);
 
         /// <summary>
         /// Created on demand before each generation pass

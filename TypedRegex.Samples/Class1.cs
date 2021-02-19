@@ -7,23 +7,22 @@ namespace TypedRegex.Samples
     {
         public static void Main()
         {
-            //var r= new TypedRegex1("b/c");
+            Console.WriteLine(Test1.IsMatch("42"));
+            Console.WriteLine(Test1.IsMatch("a42b"));
 
-            //r.b ? == Test;
+            if (Test1.TryMatch("aaaa11111", out var match1))
+            {
+                Console.WriteLine($"Found it with {match1.FirstGroup}, in {match1.Value}");
+            }
 
-            //var r = TypedRegexFactory.Create(new Regex("aa(?<t1>bb)"));
+            foreach (var match in Test1.Matches("ab42df55555"))
+            {
+                Console.WriteLine($"Got {match.FirstGroup}");
+            }
 
-            //HelloWorldGenerated.HelloWorld.SayHello();
         }
     }
 
-    [TypedRegexAttribute(@"a-f(?<g1>\d+)")]
-    public partial class TestRegex 
-    {
-        public void Test()
-        {
-            var x = this.IsMatch("af");
-            //this.
-        }
-    }
+    [TypedRegex(@"(?<digits>(?<firstGroup>\d)\d+)")]
+    public partial class Test1 { }
 }
