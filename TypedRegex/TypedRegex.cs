@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
-
+using System.Web;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -39,6 +39,9 @@ using System.Linq;
 
 namespace TypedRegex
 {
+    /// <summary>
+    /// Wrapper for a regular expression matched <see cref=""Group"" />
+    /// </summary>
     public class MatchGroup
     {
         public MatchGroup(Group group) 
@@ -46,12 +49,25 @@ namespace TypedRegex
             RawGroup = group;
         }
         
+        /// <summary>The original <see cref=""Group"" /> object.</summary>
         public Group RawGroup {get;}
+
+        /// <inheritdoc cref=""Capture.Count"" />
         public int CaptureCount => RawGroup.Captures.Count;
+        
+        /// <inheritdoc cref=""Group.Captures"" />
         public IEnumerable<string> Values => RawGroup.Captures.Cast<Capture>().Select(x => x.Value);
+
+        /// <summary>The full value of the captured group.</summary>
         public string Value => RawGroup.Value;
+        
+        /// <inheritdoc cref=""Value"" />
         public override string ToString() => RawGroup.Value;
+        
+        /// <summary>Conversion to <see cref=""string"" />.</summary>
         public static implicit operator string(MatchGroup d) => d.RawGroup.Value;
+        
+        /// <summary>Conversion to <see cref=""Group"" />.</summary>
         public static implicit operator Group(MatchGroup d) => d.RawGroup;
     }
 }";
@@ -106,31 +122,34 @@ namespace TypedRegex
                 var groupNames = regex.GetGroupNames()
                     .Select((name, idx) => (idx, IntOnly.IsMatch(name) ? "Group" + name : FirstToUpper(name)));
 
+                var xmlEscapedPattern = HttpUtility.HtmlEncode(pattern);
+
                 var source = new StringBuilder($@"
 // {namespaceName}.{className}.generated.cs
 // Pattern: {pattern}
 // Options: {options}
-using System.Collections.Generic;
-using System.Text.RegularExpressions;
 
 namespace {namespaceName} {{
     /// <summary>
     /// Typed operations on the regular expression
-    /// <c>{pattern}</c>.
+    /// <c>{xmlEscapedPattern}</c>.
     /// </summary>
     public partial class {className} {{
-        protected static Regex Regex {{ get; }} = new Regex(@""{pattern.Replace("\"", "\"\"")}"", (RegexOptions){(int)options});
+        /// <summary>
+        /// The actual <see cref=""System.Text.RegularExpressions.Regex"" /> used for matching this object.
+        /// </summary>
+        public static System.Text.RegularExpressions.Regex Regex {{ get; }} = new System.Text.RegularExpressions.Regex(@""{pattern.Replace("\"", "\"\"")}"", (System.Text.RegularExpressions.RegexOptions){(int)options});
 
         /// <summary>
         /// Check if the <paramref name=""input""/> matches the regular expression
-        /// <c>{pattern}</c>.
+        /// <c>{xmlEscapedPattern}</c>.
         /// </summary>
         /// <param name=""input"">The string to search for a match</param>
         public static bool IsMatch(string input) => Regex.IsMatch(input);
 
         /// <summary>
         /// Find the first match for <paramref name=""input""/> against the regular expression
-        /// <c>{pattern}</c>.
+        /// <c>{xmlEscapedPattern}</c>. Returns null if no match.
         /// </summary>
         /// <param name=""input"">The string to search for a match</param>
         public static {className} Match(string input)
@@ -141,7 +160,7 @@ namespace {namespaceName} {{
 
         /// <summary>
         /// Find the first match for <paramref name=""input""/> against the regular expression
-        /// <c>{pattern}</c>, returning true if found.
+        /// <c>{xmlEscapedPattern}</c>, returning true if found.
         /// </summary>
         /// <param name=""input"">The string to search for a match</param>
         public static bool TryMatch(string input, out {className} match)
@@ -152,10 +171,10 @@ namespace {namespaceName} {{
 
         /// <summary>
         /// Find all matches for <paramref name=""input""/> against the regular expression
-        /// <c>{pattern}</c>.
+        /// <c>{xmlEscapedPattern}</c>. Returns an empty collection if there are no matches.
         /// </summary>
         /// <param name=""input"">The string to search for a match</param>
-        public static IEnumerable<{className}> Matches(string input)
+        public static System.Collections.Generic.IEnumerable<{className}> Matches(string input)
         {{
             var match = Regex.Match(input);
             while (match.Success)
@@ -165,25 +184,26 @@ namespace {namespaceName} {{
             }}
         }}
 
-
-        private {className}(Match match)
+        private {className}(System.Text.RegularExpressions.Match match)
         {{
             RawMatch = match;
-            ");
+");
                 foreach ((var matchIndex, var propertyName) in groupNames)
                 {
-                    source.AppendLine($"{propertyName} = new TypedRegex.MatchGroup(match.Groups[{matchIndex}]);");
+                    source.AppendLine($"            {propertyName} = new TypedRegex.MatchGroup(match.Groups[{matchIndex}]);");
                 }
                 source.Append($@"
         }}
 
-        public Match RawMatch {{ get; }}
+        /// <summary>The original <see cref=""System.Text.RegularExpressions.Match""> object.</summary>
+        public System.Text.RegularExpressions.Match RawMatch {{ get; }}
 
+        /// <summary>The captured substring matching the full expression.</summary>
         public string Value => RawMatch.Value;
-
-        ");
+");
                 foreach ((var matchIndex, var propertyName) in groupNames)
                 {
+                    source.AppendLine($@"        /// <summary>The capture group at index {matchIndex}</summary>");
                     source.AppendLine($@"        public TypedRegex.MatchGroup {propertyName} {{ get; }}");
                 }
 
