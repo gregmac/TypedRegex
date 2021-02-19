@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Text.RegularExpressions;
 
 namespace TypedRegex.Samples
 {
@@ -19,10 +18,10 @@ namespace TypedRegex.Samples
             {
                 Console.WriteLine($"Got {match.FirstGroup}");
             }
-
         }
     }
 
-    [TypedRegex(@"(?<digits>(?<firstGroup>\d)\d+)")]
+    // language=regex
+    [Regex(@"(?<digits>(?<firstGroup>\d)\d+)")]
     public partial class Test1 { }
 }

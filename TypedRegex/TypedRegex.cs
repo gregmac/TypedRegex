@@ -14,16 +14,16 @@ namespace SourceGeneratorSamples
     [Generator]
     public class AutoNotifyGenerator : ISourceGenerator
     {
-        private const string TypedRegexAttribute = @"
+        private const string RegexAttribute = @"
 using System;
 using System.Text.RegularExpressions;
 namespace TypedRegex
 {
     [AttributeUsage(AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
-    sealed class TypedRegexAttribute : Attribute
+    sealed class RegexAttribute : Attribute
     {
-        public TypedRegexAttribute(string pattern) : this(pattern, RegexOptions.None) { }
-        public TypedRegexAttribute(string pattern, RegexOptions options)
+        public RegexAttribute(string pattern) : this(pattern, RegexOptions.None) { }
+        public RegexAttribute(string pattern, RegexOptions options)
         {
             Regex = new Regex(pattern, options);
         }
@@ -67,7 +67,7 @@ namespace TypedRegex
         public void Execute(GeneratorExecutionContext context)
         {
             // add static source
-            context.AddSource(nameof(TypedRegexAttribute) + ".cs", TypedRegexAttribute);
+            context.AddSource(nameof(RegexAttribute) + ".cs", RegexAttribute);
             context.AddSource(nameof(MatchGroup) + ".cs", MatchGroup);
 
             // retreive the populated receiver 
@@ -77,10 +77,10 @@ namespace TypedRegex
             // we're going to create a new compilation that contains the attribute.
             // TODO: we should allow source generators to provide source during initialize, so that this step isn't required.
             CSharpParseOptions parseOptions = (context.Compilation as CSharpCompilation).SyntaxTrees[0].Options as CSharpParseOptions;
-            Compilation compilation = context.Compilation.AddSyntaxTrees(CSharpSyntaxTree.ParseText(SourceText.From(TypedRegexAttribute, Encoding.UTF8), parseOptions));
+            Compilation compilation = context.Compilation.AddSyntaxTrees(CSharpSyntaxTree.ParseText(SourceText.From(RegexAttribute, Encoding.UTF8), parseOptions));
 
             // get the newly bound attribute
-            INamedTypeSymbol attributeSymbol = compilation.GetTypeByMetadataName("TypedRegex.TypedRegexAttribute");
+            INamedTypeSymbol attributeSymbol = compilation.GetTypeByMetadataName("TypedRegex.RegexAttribute");
 
             // loop over the candidate classes, and keep the ones that are actually annotated
             foreach (var @class in receiver.CandidateClasses)
