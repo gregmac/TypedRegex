@@ -17,14 +17,12 @@ namespace TypedRegex.Samples
         }
     }
 
-
-    public partial class TestRegex : TypedRegex
+    [TypedRegexAttribute(@"a-f(?<g1>\d+)")]
+    public partial class TestRegex 
     {
-        private TestRegex() : base(new Regex(@"a(?<g1>\d+)")) { }
-
         public void Test()
         {
-            var x = this.FoundIt;
+            var x = this.IsMatch("af");
             //this.
         }
     }

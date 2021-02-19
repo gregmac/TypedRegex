@@ -1,128 +1,113 @@
-﻿using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
-using Microsoft.CodeAnalysis.Text;
+﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
+using Microsoft.CodeAnalysis.Text;
+
+namespace SourceGeneratorSamples
+{
+    [Generator]
+    public class AutoNotifyGenerator : ISourceGenerator
+    {
+        private const string attributeText = @"
+using System;
+using System.Text.RegularExpressions;
 namespace TypedRegex
 {
-    //https://dominikjeske.github.io/source-generators/
-
-    public abstract class TypedRegex
+    [AttributeUsage(AttributeTargets.Class, Inherited = false, AllowMultiple = false)]
+    public sealed class TypedRegexAttribute : Attribute
     {
-        protected Regex Regex { get; }
-
-        protected TypedRegex(string pattern) : this (new Regex(pattern)) { }
-        protected TypedRegex(string pattern, RegexOptions options) : this(new Regex(pattern, options)) { }
-        protected TypedRegex(Regex regex)
+        public TypedRegexAttribute(string pattern) : this(pattern, RegexOptions.None) { }
+        public TypedRegexAttribute(string pattern, RegexOptions options)
         {
-            Regex = regex;
+            Regex = new Regex(pattern, options);
         }
 
-        public bool IsMatch(string input) => Regex.IsMatch(input);
+        public Regex Regex { get; }
     }
+}
+";
 
-    [Generator]
-    public class AugmentingGenerator : ISourceGenerator
-    {
         public void Initialize(GeneratorInitializationContext context)
         {
-            // Register a factory that can create our custom syntax receiver
-            context.RegisterForSyntaxNotifications(() => new MySyntaxReceiver());
+            // Register a syntax receiver that will be created for each generation pass
+            context.RegisterForSyntaxNotifications(() => new SyntaxReceiver());
         }
 
         public void Execute(GeneratorExecutionContext context)
         {
-            var cancellationToken = context.CancellationToken;
+            // add the attribute text
+            context.AddSource("TypedRegexAttribute", attributeText);
 
-
-            // the generator infrastructure will create a receiver and populate it
-            // we can retrieve the populated instance via the context
-            var syntaxReceiver = (MySyntaxReceiver)context.SyntaxReceiver;
-
-            // get the recorded user class
-            var userClass = syntaxReceiver.ClassToAugment;
-            if (userClass is null)
-            {
-                // if we didn't find the user class, there is nothing to do
+            // retrieve the populated receiver 
+            if (!(context.SyntaxReceiver is SyntaxReceiver receiver))
                 return;
-            }
 
-            var classNamespace = GetNamespaceFrom(userClass);
+            // we're going to create a new compilation that contains the attribute.
+            // TODO: we should allow source generators to provide source during initialize, so that this step isn't required.
+            CSharpParseOptions parseOptions = (context.Compilation as CSharpCompilation).SyntaxTrees[0].Options as CSharpParseOptions;
+            Compilation compilation = context.Compilation.AddSyntaxTrees(CSharpSyntaxTree.ParseText(SourceText.From(attributeText, Encoding.UTF8), parseOptions));
 
+            // get the newly bound attribute
+            INamedTypeSymbol attributeSymbol = compilation.GetTypeByMetadataName("TypedRegex.TypedRegexAttribute");
 
-            //System.Diagnostics.Debugger.Launch();
-
-    var constructors = userClass.ChildNodes()
-                .Where(n => n.IsKind(SyntaxKind.ConstructorDeclaration))
-                .Cast<ConstructorDeclarationSyntax>();
-
-            foreach (var constructor in constructors)
+            // loop over the candidate classes, and keep the ones that are actually annotated
+            foreach (var @class in receiver.CandidateClasses)
             {
-                var parameters = constructor.ParameterList
-                   .ChildNodes()
-                   .Cast<ParameterSyntax>()
-                   .OrderBy(node => ((IdentifierNameSyntax)node.Type).Identifier.ToString())
-                   .Select(node => SyntaxFactory.Parameter(
-                       SyntaxFactory.List<AttributeListSyntax>(),
-                       SyntaxFactory.TokenList(),
-                       SyntaxFactory.ParseTypeName(((IdentifierNameSyntax)node.Type).Identifier.Text),
-                       SyntaxFactory.Identifier(node.Identifier.Text),
-                       null))
-                 .ToList();
-                //System.Diagnostics.Debugger.Launch();
-            }
+                SemanticModel model = compilation.GetSemanticModel(@class.SyntaxTree);
+                var classSymbol = model.GetDeclaredSymbol(@class);
+                var attributeData = classSymbol.GetAttributes()
+                    .Single(a => a.AttributeClass.Equals(attributeSymbol, SymbolEqualityComparer.Default));
 
+                string namespaceName = classSymbol.ContainingNamespace.ToDisplayString();
+                string className = classSymbol.Name;
 
-            foreach (var syntaxTree in context.Compilation.SyntaxTrees)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
+                // validate arguments
+                var pattern = attributeData.ConstructorArguments[0].Value as string;
+                var options = attributeData.ConstructorArguments.Length > 1
+                    ? (RegexOptions)attributeData.ConstructorArguments[1].Value
+                    : RegexOptions.None;
 
+                context.AddSource($"{namespaceName}.{className}.generated.cs", $@"
+// {namespaceName}.{className}.generated.cs
+// Pattern: {pattern}
+// Options: {options}
+using System.Text.RegularExpressions;
+namespace {namespaceName} {{
+    public partial class {className} {{
+        protected Regex Regex {{ get; }} = new Regex(@""{pattern.Replace("\"", "\"\"")}"", (RegexOptions){(int)options});
 
-                var semanticModel = context.Compilation.GetSemanticModel(syntaxTree);
-            }
-
-                // add the generated implementation to the compilation
-                SourceText sourceText = SourceText.From($@"
-namespace {classNamespace} {{
-    public partial class {userClass.Identifier}
-    {{
-        public string FoundIt => ""yes"";
-        public class Result {{
-        
-       }}
+        public bool IsMatch(string value) => Regex.IsMatch(value);
     }}
-}}", Encoding.UTF8);
-            context.AddSource("UserClass.Generated.cs", sourceText);
+}}
+
+");
+
+            }
         }
 
         /// <summary>
-        /// From https://stackoverflow.com/a/63686228/7913
+        /// Created on demand before each generation pass
         /// </summary>
-        /// <param name="s"></param>
-        /// <returns></returns>
-        public static string GetNamespaceFrom(SyntaxNode s)
-            => s.Parent switch
-            {
-                NamespaceDeclarationSyntax namespaceDeclarationSyntax => namespaceDeclarationSyntax.Name.ToString(),
-                null => string.Empty, // or whatever you want to do
-                    _ => GetNamespaceFrom(s.Parent)
-            };
-
-        public class MySyntaxReceiver : ISyntaxReceiver
+        internal class SyntaxReceiver : ISyntaxReceiver
         {
-            public ClassDeclarationSyntax ClassToAugment { get; private set; }
+            public List<ClassDeclarationSyntax> CandidateClasses { get; } = new List<ClassDeclarationSyntax>();
 
+            /// <summary>
+            /// Called for every syntax node in the compilation, we can inspect the nodes and save any information useful for generation
+            /// </summary>
             public void OnVisitSyntaxNode(SyntaxNode syntaxNode)
             {
-                
-                // Business logic to decide what we're interested in goes here
-                if (syntaxNode is ClassDeclarationSyntax cds &&
-                    cds.BaseList?.Types.Any(x => x.Type?.ToString()?.Contains("TypedRegex") == true) == true) // todo: yuck
+                // any field with at least one attribute is a candidate for property generation
+                if (syntaxNode is ClassDeclarationSyntax cds
+                    && cds.AttributeLists.Count > 0)
                 {
-                    ClassToAugment = cds;
+                    CandidateClasses.Add(cds);
                 }
             }
         }
