@@ -68,6 +68,12 @@ namespace TypedRegex
         
         /// <summary>Conversion to <see cref=""Group"" />.</summary>
         public static implicit operator Group(MatchGroup d) => d.RawGroup;
+
+        /// <inheritdoc />
+        public override bool Equals(object obj) => obj is MatchGroup group && RawGroup.Equals(group.RawGroup);
+    
+        /// <inheritdoc />
+        public override int GetHashCode() => RawGroup.GetHashCode();
     }
 }";
         private readonly Regex IntOnly = new Regex(@"^\d+$");
@@ -209,6 +215,12 @@ namespace {namespaceName} {{
                 }
 
                 source.Append($@"
+
+        /// <inheritdoc />
+        public override bool Equals(object obj) => obj is {className} other && Value.Equals(other.Value);
+    
+        /// <inheritdoc />
+        public override int GetHashCode() => RawMatch.GetHashCode();
     }}
 }}
 ");
