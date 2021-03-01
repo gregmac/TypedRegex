@@ -2,6 +2,7 @@
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -32,16 +33,17 @@ namespace TypedRegex
 }
 ";
         private const string MatchGroup = @"
+using System.Collections;
 using System.Collections.Generic;
-using System.Text.RegularExpressions;
 using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace TypedRegex
 {
     /// <summary>
     /// Wrapper for a regular expression matched <see cref=""Group"" />
     /// </summary>
-    public class MatchGroup
+    public class MatchGroup : IEnumerable<string>
     {
         public MatchGroup(Group group) 
         {
@@ -68,6 +70,12 @@ namespace TypedRegex
         
         /// <summary>Conversion to <see cref=""Group"" />.</summary>
         public static implicit operator Group(MatchGroup d) => d.RawGroup;
+
+		/// <inheritdoc/>
+		public IEnumerator<string> GetEnumerator() => Values.GetEnumerator();
+
+		/// <inheritdoc/>
+		IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
         /// <inheritdoc />
         public override bool Equals(object obj) => obj is MatchGroup group && RawGroup.Equals(group.RawGroup);
@@ -126,14 +134,21 @@ namespace TypedRegex
                 var groupNames = regex.GetGroupNames()
                     .Select((name, idx) => (idx, IntOnly.IsMatch(name) ? "Group" + name : FirstToUpper(name)));
 
-                var xmlEscapedPattern = HttpUtility.HtmlEncode(pattern);
+                var xmlEscapedPattern = string.Join(Environment.NewLine + "/// ", HttpUtility.HtmlEncode(pattern).Split('\n'));
 
 #pragma warning disable RCS1214 // Unnecessary interpolated string.
 #pragma warning disable RCS1197 // Optimize StringBuilder.Append/AppendLine call.
-                var source = new StringBuilder($@"
-// {namespaceName}.{className}.generated.cs
-// Pattern: {pattern}
-// Options: {options}
+                var source = new StringBuilder($"// {namespaceName}.{className}.generated.cs{System.Environment.NewLine}");
+                if (pattern.Contains("\n"))
+                {
+                    source.AppendLine("// Pattern:");
+                    foreach (var line in pattern.Split('\n')) source.Append("//    ").AppendLine(line);
+                }
+                else
+                {
+                    source.Append("// Pattern: ").AppendLine(pattern);
+                }
+                source.AppendLine($@"// RegexOptions: {options}
 
 namespace {namespaceName} {{
     /// <summary>
@@ -203,11 +218,11 @@ namespace {namespaceName} {{
 
         /// <summary>The original <see cref=""System.Text.RegularExpressions.Match""> object.</summary>
         public System.Text.RegularExpressions.Match RawMatch {{ get; }}
-
+ 
         /// <summary>The captured substring matching the full expression.</summary>
         public string Value => RawMatch.Value;
-
 ");
+
                 foreach ((var matchIndex, var propertyName) in groupNames)
                 {
                     source.AppendLine($"        /// <summary>The capture group at index {matchIndex}</summary>");
@@ -215,7 +230,7 @@ namespace {namespaceName} {{
                 }
 
                 source.Append($@"
-
+        
         /// <inheritdoc />
         public override bool Equals(object obj) => obj is {className} other && Value.Equals(other.Value);
     
