@@ -18,7 +18,7 @@ The rest of the class is auto-generated as:
 ```csharp
 public partial class IsoDate {
     public Match RawMatch { get; }
-    public string Value;
+    public string Value { get; }
     public MatchGroup Group0 { get; }
     public MatchGroup Year { get; }
     public MatchGroup Month { get; }
